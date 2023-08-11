@@ -34,6 +34,7 @@ def receiveFile(sock, filePath):
             received += len(data)
 
         file.close()
+        print("File received successfully.")
 
 #SEND FILE TO CLIENT
 def sendFile(conn, filePath):
@@ -51,6 +52,7 @@ def sendFile(conn, filePath):
             conn.sendall(chunk)
             offset += chunk_size
         
+        file.close()
         print("File uploaded successfully")
 
 while True:
@@ -69,7 +71,6 @@ while True:
         filePathSave = input("Enter the file path to save: ")
         conn.send(filePathSave.encode('utf-8', errors='replace'))
         receiveFile(conn, filePathSave)
-        print("File received successfully.")
     if cmd == "UF":
         filePathUp = input("Enter file path you want to upload to client: ")
         filePathSave = input("Enter the file path to save on the client: ")

