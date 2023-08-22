@@ -431,7 +431,7 @@ void sendFile(SOCKET clientSocket){
 	recvData(clientSocket, filePath);
 
 	FILE* file = fopen(filePath, "rb");
-    if (!file) {
+    if (file == NULL) {
         sendData(clientSocket, "Failed to open file!");
     }
 
@@ -448,16 +448,21 @@ void sendFile(SOCKET clientSocket){
     while (totalSent < lengthFile) {
         bytesRead = fread(buffer, 1, BUFFER_SIZE, file);
         if (bytesRead <= 0) {
+			sendData(clientSocket, "Error reading file");
             break;
         }
         int bytesSent = send(clientSocket, buffer, bytesRead, 0);
         if (bytesSent <= 0) {
+			sendData(clientSocket, "Error sending file");
             break;
         }
-        totalSent += bytesSent;
+        totalSent += bytesRead;
     }
+	fclose(file);
+	file = NULL;
+	memset(filePath, 0, BUFFER_SIZE);
+	memset(buffer, 0, BUFFER_SIZE);
     sendData(clientSocket, "File transfer complete!");
-    fclose(file);
 }
 
 //---------------------------------------------------------------- FILE UPLOAD FROM SERVER TO CLIENT
@@ -466,7 +471,7 @@ void receiveFile(SOCKET clientSocket) {
 	char filePath[BUFFER_SIZE];
 	recvData(clientSocket, filePath);
 
-    FILE* file = fopen(filePath, "wb");
+    FILE* file = fopen(filePath, "wb+");
     if (!file) {
         sendData(clientSocket, "Failed to open file for writing.");
         return;
@@ -491,6 +496,9 @@ void receiveFile(SOCKET clientSocket) {
     }
 
     fclose(file);
+	file = NULL;
+	memset(filePath, 0, BUFFER_SIZE);
+	memset(buffer, 0, BUFFER_SIZE);
     sendData(clientSocket, "File received successfully.");
 }
 

@@ -1,4 +1,4 @@
-import socket, sys, struct, os
+import socket, sys, struct, os, gc
 
 HOST = "0.0.0.0"
 PORT = 8008
@@ -19,8 +19,8 @@ def bannerPW():
     """)
 
 #RECEIVE FILE FROM CLIENT 
-def receiveFile(sock, filePath):
-    with open(filePath, "wb") as file:
+def receiveFile(conn, filePath):
+    with open(filePath, "wb+") as file:
         # Receive the file size from the client
         fileSizeData = conn.recv(4)
         size = struct.unpack('!I', fileSizeData)[0]
@@ -29,10 +29,13 @@ def receiveFile(sock, filePath):
         # Receive the data file
         received = 0
         while received < size:
-            data = conn.recv(min(8096, size - received))
+            data = conn.recv(8096)
             file.write(data)
             received += len(data)
-
+        del data
+        del fileSizeData
+        received = 0
+        gc.collect()
         file.close()
         print("File received successfully.")
 
@@ -71,11 +74,17 @@ while True:
         filePathSave = input("Enter the file path to save: ")
         conn.send(filePathSave.encode('utf-8', errors='replace'))
         receiveFile(conn, filePathSave)
+        del filePathDown
+        del filePathSave
+        gc.collect()
     if cmd == "UF":
         filePathUp = input("Enter file path you want to upload to client: ")
         filePathSave = input("Enter the file path to save on the client: ")
         conn.send(filePathSave.encode('utf-8', errors='replace'))
         sendFile(conn, filePathUp)
+        del filePathSave
+        del filePathUp
+        gc.collect()
     if cmd == "EXIT":
         print("Connection closed!")
         conn.close()
